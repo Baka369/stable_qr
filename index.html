@@ -2,62 +2,95 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>jsQR Demo - Extended Time</title>
-  <script src="./jsQR.js"></script>
+  <title>Improved jsQR Demo</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+  <link href="https://fonts.googleapis.com/css?family=Ropa+Sans" rel="stylesheet">
   <style>
     body {
       font-family: 'Ropa Sans', sans-serif;
       color: #333;
       max-width: 640px;
       margin: 0 auto;
+      position: relative;
     }
-
+    #githubLink {
+      position: absolute;
+      right: 0;
+      top: 12px;
+      color: #2D99FF;
+    }
+    h1 {
+      margin: 10px 0;
+      font-size: 40px;
+    }
     #loadingMessage {
       text-align: center;
-      padding: 20px;
+      padding: 40px;
       background-color: #eee;
     }
-
     #canvas {
-      display: block;
-      margin: 0 auto;
       width: 100%;
     }
-
     #output {
       margin-top: 20px;
       background: #eee;
       padding: 10px;
+      padding-bottom: 0;
     }
-
-    #outputMessage {
+    #output div {
+      padding-bottom: 10px;
+      word-wrap: break-word;
+    }
+    #noQRFound {
       text-align: center;
-      color: #888;
+    }
+    #controlButtons {
+      display: flex;
+      justify-content: center;
+      margin-top: 20px;
+    }
+    #controlButtons button {
+      margin: 0 10px;
+      padding: 10px 20px;
     }
   </style>
 </head>
 <body>
-  <h1>QR Code Scanner</h1>
-  <div id="loadingMessage">🎥 Initializing video stream...</div>
+  <h1>Improved QR Code Scanner</h1>
+  <p>Advanced QR Code Scanning with Improved Stability</p>
+  <div id="loadingMessage">🎥 Unable to access video stream (please make sure you have a webcam enabled)</div>
   <canvas id="canvas" hidden></canvas>
-  <div id="output">
+  <div id="output" hidden>
     <div id="outputMessage">No QR code detected.</div>
-    <div hidden><strong>Data:</strong> <span id="outputData"></span></div>
+    <div hidden><b>Data:</b> <span id="outputData"></span></div>
+    <div hidden><b>Last Successful Scan:</b> <span id="lastSuccessfulScan"></span></div>
+  </div>
+  <div id="controlButtons">
+    <button id="startScanBtn">Start Scanning</button>
+    <button id="stopScanBtn" disabled>Stop Scanning</button>
   </div>
 
   <script>
+    // DOM Elements
     const video = document.createElement("video");
     const canvasElement = document.getElementById("canvas");
     const canvas = canvasElement.getContext("2d");
     const loadingMessage = document.getElementById("loadingMessage");
+    const outputContainer = document.getElementById("output");
     const outputMessage = document.getElementById("outputMessage");
     const outputData = document.getElementById("outputData");
+    const lastSuccessfulScan = document.getElementById("lastSuccessfulScan");
+    const startScanBtn = document.getElementById("startScanBtn");
+    const stopScanBtn = document.getElementById("stopScanBtn");
 
-    let qrDetected = false;
-    let qrData = '';
-    const visibilityTimeout = 5000; // Keep QR data visible for 5 seconds
-    let timeoutId = null;
+    // Scanning configuration
+    let scanningActive = false;
+    let consecutiveSuccessfulScans = 0;
+    const MAX_CONSECUTIVE_SCANS = 5; // Maximum number of consecutive successful scans before pausing
+    const SCAN_INTERVAL_MS = 300; // Time between scan attempts
+    const RESET_INTERVAL_MS = 2000; // Time to wait before resetting scan attempts
 
+    // QR Code drawing function
     function drawLine(begin, end, color) {
       canvas.beginPath();
       canvas.moveTo(begin.x, begin.y);
@@ -67,61 +100,100 @@
       canvas.stroke();
     }
 
-    // Initialize webcam stream
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(function(stream) {
-      video.srcObject = stream;
-      video.setAttribute("playsinline", true);
-      video.play();
-      requestAnimationFrame(tick);
-    });
-
+    // Scan function
     function tick() {
-      loadingMessage.innerText = "⌛ Loading video...";
+      if (!scanningActive) return;
+
       if (video.readyState === video.HAVE_ENOUGH_DATA) {
         loadingMessage.hidden = true;
         canvasElement.hidden = false;
+        outputContainer.hidden = false;
 
         canvasElement.height = video.videoHeight;
         canvasElement.width = video.videoWidth;
         canvas.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
+        
         const imageData = canvas.getImageData(0, 0, canvasElement.width, canvasElement.height);
         const code = jsQR(imageData.data, imageData.width, imageData.height, {
           inversionAttempts: "dontInvert",
         });
 
         if (code) {
+          // Draw QR code boundaries
           drawLine(code.location.topLeftCorner, code.location.topRightCorner, "#FF3B58");
           drawLine(code.location.topRightCorner, code.location.bottomRightCorner, "#FF3B58");
           drawLine(code.location.bottomRightCorner, code.location.bottomLeftCorner, "#FF3B58");
           drawLine(code.location.bottomLeftCorner, code.location.topLeftCorner, "#FF3B58");
 
-          // Display the QR data and reset timeout
-          if (!qrDetected || qrData !== code.data) {
-            qrData = code.data;
-            qrDetected = true;
-            outputMessage.hidden = true;
-            outputData.parentElement.hidden = false;
-            outputData.innerText = qrData;
+          // Update output
+          outputMessage.hidden = true;
+          outputData.parentElement.hidden = false;
+          outputData.innerText = code.data;
+          lastSuccessfulScan.parentElement.hidden = false;
+          lastSuccessfulScan.innerText = code.data + " (at " + new Date().toLocaleTimeString() + ")";
 
-            // Clear previous timeout if a new QR code is detected
-            if (timeoutId) clearTimeout(timeoutId);
-            timeoutId = setTimeout(() => {
-              qrDetected = false;
-              outputMessage.hidden = false;
-              outputData.parentElement.hidden = true;
-            }, visibilityTimeout);
+          consecutiveSuccessfulScans++;
+
+          // Pause scanning if too many consecutive successful scans
+          if (consecutiveSuccessfulScans >= MAX_CONSECUTIVE_SCANS) {
+            setTimeout(() => {
+              consecutiveSuccessfulScans = 0;
+            }, RESET_INTERVAL_MS);
           }
-        } else if (qrDetected) {
-          // Keep the QR data visible until timeout occurs
-          timeoutId = setTimeout(() => {
-            qrDetected = false;
-            outputMessage.hidden = false;
-            outputData.parentElement.hidden = true;
-          }, visibilityTimeout);
+        } else {
+          outputMessage.hidden = false;
+          outputData.parentElement.hidden = true;
+          consecutiveSuccessfulScans = 0;
         }
       }
-      requestAnimationFrame(tick);
+
+      // Continue scanning with a small delay to reduce CPU usage
+      if (scanningActive) {
+        setTimeout(() => {
+          requestAnimationFrame(tick);
+        }, SCAN_INTERVAL_MS);
+      }
     }
+
+    // Start scanning
+    function startScanning() {
+      // Use facingMode: environment to attempt to get the front camera on phones
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(function(stream) {
+        video.srcObject = stream;
+        video.setAttribute("playsinline", true); // required to tell iOS safari we don't want fullscreen
+        video.play();
+        
+        scanningActive = true;
+        startScanBtn.disabled = true;
+        stopScanBtn.disabled = false;
+        
+        requestAnimationFrame(tick);
+      }).catch(function(err) {
+        console.error("Error accessing camera:", err);
+        loadingMessage.innerText = "Error accessing camera. Please check permissions.";
+      });
+    }
+
+    // Stop scanning
+    function stopScanning() {
+      scanningActive = false;
+      
+      // Stop video stream
+      const stream = video.srcObject;
+      const tracks = stream.getTracks();
+      tracks.forEach(track => track.stop());
+      
+      // Reset UI
+      startScanBtn.disabled = false;
+      stopScanBtn.disabled = true;
+      loadingMessage.hidden = false;
+      canvasElement.hidden = true;
+      outputContainer.hidden = true;
+    }
+
+    // Event Listeners
+    startScanBtn.addEventListener('click', startScanning);
+    stopScanBtn.addEventListener('click', stopScanning);
   </script>
 </body>
 </html>
